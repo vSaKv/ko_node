@@ -1,0 +1,25 @@
+{
+  "name": "nodeServ",
+  "version": "1.0.0",
+  "description": "Test Project for Kochava",
+  "main": "node.js",
+  "dependencies": {
+    "httpdispatcher": "~0.4.0",
+    "now": "~0.8.1",
+    "q": "~1.4.1",
+    "redis": "~2.2.3"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/vSaKv/ko_node.git"
+  },
+  "author": "Sergei Krutov",
+  "license": "BSD-2-Clause",
+  "bugs": {
+    "url": "https://github.com/vSaKv/ko_node/issues"
+  }
+}
