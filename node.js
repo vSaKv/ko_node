@@ -124,9 +124,6 @@ function Consumer() {
 	this.scriptSha=this.shasum.digest('hex');
 
 
-	// save shutdown
-	process.on ('SIGTERM', self.ShutDown);
-	process.on ('SIGINT', self.ShutDown);
 
 	Consumer.prototype.ShutDown= function() {
 		console.log("Received kill signal, shutting down gracefully.");
@@ -139,6 +136,10 @@ function Consumer() {
 		},self.config['responseTimeOut']*100);
 
 	}
+
+	// save shutdown
+	process.on ('SIGTERM', self.ShutDown);
+	process.on ('SIGINT', self.ShutDown);
 
 	Consumer.prototype.Cluster= function () {
 		console.log('Starting Cluster Mode App');
@@ -202,9 +203,9 @@ function Consumer() {
 
 	Consumer.prototype.confirmSubscription = function (refreshInterval) {
 		setInterval(function(){
-			if(self.activeConn<=0 && self.shutingDown===false){
-				self.client.subscribe("queue");
-			}
+				if(self.activeConn<=0 && self.shutingDown===false && self.client.pub_sub_mode===false){
+					self.client.subscribe("queue");
+				}
 		},60*1000);
 	}
 
@@ -261,6 +262,7 @@ function Consumer() {
 
 
 	Consumer.prototype.prepFetchTask = function () {
+		//console.log('ddd');
 		/*
 			Task manager, fetching new records from system, and sending further to be delivered or if not found, resubscribe to pub/sub
 		 */
@@ -279,7 +281,8 @@ function Consumer() {
 			if(reply!=undefined){
 
 				//if not exceeded concurrent connection and not going down, then try to call itself to check if new record found
-				if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+
+				if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false && reply[0]=="process"){
 					self.prepFetchTask();
 				}
 				self.activeConn++;
@@ -287,17 +290,19 @@ function Consumer() {
 				//do the same after callback
 				self.processReply(reply,function(){
 					self.activeConn--;
-					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false && reply[0]=="process"){
 						self.prepFetchTask();
 					}
-
+					if(self.shutingDown===false && self.activeConn<=0 && !self.client.pub_sub_mode && reply[0]=="subscribe"){
+						self.client.subscribe("queue");
+					}
 				});
 			}else{
 
 				self.client2.eval(args, function(err, reply) {
 
 					//if not exceeded concurrent connection and not going down, then try to call itself to check if new record found
-					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false && reply[0]=="process"){
 						self.prepFetchTask();
 					}
 					self.activeConn++;
@@ -306,12 +311,18 @@ function Consumer() {
 					self.processReply(reply,function(){
 						self.activeConn--;
 
-						if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+						if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false && reply[0]=="process"){
 							self.prepFetchTask();
+						}
+						if(self.shutingDown===false && self.activeConn<=0 && !self.client.pub_sub_mode && reply[0]=="subscribe"){
+							self.client.subscribe("queue");
 						}
 					});
 
+
+
 				})
+
 			}
 		});
 
@@ -333,7 +344,7 @@ function Consumer() {
 
 		}else if(reply[0]=="subscribe"){
 			//console.log('no more records to fetch, and last connection will subscribe to que');
-			if(self.shutingDown===false && self.activeConn<=0){
+			if(self.shutingDown===false && self.activeConn<=0 && !self.client.pub_sub_mode){
 				self.client.subscribe("queue");
 			}
 			callback();
@@ -426,6 +437,7 @@ function Consumer() {
 			multi.hset(loadHash, 'responseBody',body);
 			multi.hset(loadHash, 'deliveryAttempt',deliveryAttempt);
 			multi.hset(loadHash, 'responseFinished',responseFinished);
+			multi.incrby('redisProcessed',1);
 
 				if(parseInt(statusCode)==200){
 					multi.incrby("successCalls", 1);
@@ -433,6 +445,7 @@ function Consumer() {
 					multi.sadd('successList',loadHash);
 				}else{
 					multi.incrby("failedCalls", 1);
+					multi.sadd('failedList',loadHash);
 					multi.hincrby(loadHash, 'count',1);
 					multi.zadd('sQue',responseFinished+self.config['deliveryAttempts'][deliveryAttempt],loadHash);
 				}
@@ -472,9 +485,9 @@ function Consumer() {
 
 			})
 
-			.setTimeout(self.config['responseTimeOut']*1000, function(){
-			req.abort();
-		});
+			req.setTimeout(self.config['responseTimeOut']*1000, function(){
+				req.abort();
+			});
 	}
 
 
@@ -497,6 +510,7 @@ function Consumer() {
 			}
 		};
 
+		var deliveryT=Math.floor(Date.now() / 1000);
 		var req = http.request(options, function(res) {
 				var body = '';
 				res.setEncoding('utf8');

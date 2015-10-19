@@ -1,0 +1,187 @@
+<html>
+<head>
+    <!-- include jquery -->
+    <script src="/jquery.min.js"></script>
+
+    <!-- include nowjs -->
+    <script>
+        var oldData={};
+        var count=0;
+        function submitRequest(){
+
+
+            $.ajax({
+                type: 'GET',
+                url: 'start',
+                data:{
+                    'posts':$('#posts').val(),
+                    'gets':$('#gets').val(),
+                    'concur':$('#concur').val()
+                },
+                dataType: 'json'
+            });
+
+          var started= setInterval(function(){
+
+                $.getJSON( "update", function( data ) {
+
+                    if(JSON.stringify(oldData)==JSON.stringify(data)){
+
+                        if(count>2){
+                            clearInterval(started);
+                        }
+                        count++;
+                    }
+                    oldData=data;
+                    $.each( data, function( key, val ) {
+                        $('.'+key).html(val);
+                    });
+
+                });
+
+            },5000);
+        }
+
+    </script>
+</head>
+
+<body>
+<div id="messages">
+    <table border="1"  style="border-collapse: collapse;" width="900">
+      <tr>
+          <td colspan="4"> Benchmark Test
+          </td>
+      </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td width="200">Total Req Processed:</td>
+            <td colspan="3"><span class="totalCallsPerSession"></span></td>
+
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td width="200">Req/sec:</td>
+            <td><span class="reqpersec"></span></td>
+            <td width="200">Best Req/sec:</td>
+            <td width="250"><span class="subReqSecBest"></span></td>
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td width="200">POST Request Processed:</td>
+            <td width="250"><span class="processedPosts"></span></td>
+            <td width="200">GET Request Processed:</td>
+            <td width="250"><span class="processedGets"></span></td>
+        </tr>
+        <tr>
+            <td>Success POST Request:</td>
+            <td><span class="successPostCalls"></span></td>
+            <td>Success GET Request:</td>
+            <td><span class="successGetsCalls"></span></td>
+        </tr>
+        <tr>
+            <td>Failed POST Request:</td>
+            <td><span class="failedPostCalls"></span></td>
+            <td>Failed POST Request:</td>
+            <td><span class="failedGetsCalls"></span></td>
+        </tr>
+
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+
+        <tr>
+            <td colspan="2">Time took to load: <span class="totalPOSTCallsPerSession"></span> POST requests</td>
+            <td colspan="2"><span class="timeTotalPOSTCallsPerSession"></span> seconds, with  <span class="postreqpersec"></span> req/sec</td>
+
+        </tr>
+        <tr>
+            <td colspan="2">Time took to load: <span class="totalGETCallsPerSession"></span> GET requests</td>
+            <td colspan="2"><span class="timeTotalGETCallsPerSession"></span> seconds, with  <span class="getreqpersec"></span> req/sec</td>
+
+        </tr>
+
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+
+        <tr>
+            <td colspan="4"> Redis Session Result:
+            </td>
+        </tr>
+
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td colspan="2">Redis Received Request Per Session:</td>
+            <td colspan="2"><span class="redisRequestReceivedSession"></span></td>
+
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td width="200">Redis Req/Sec:</td>
+            <td><span class="redisReqPerSec"></span></td>
+            <td>Best Redis Req / Sec:</td>
+            <td><span class="redisReqPerSecBest"></span></td>
+
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td>Redis GET Req / Session:</td>
+            <td><span class="redisGetCallsSession"></span></td>
+            <td>Redis POST Req / Session:</td>
+            <td><span class="redisPostCallsSession"></span></td>
+        </tr>
+
+        <tr>
+            <td>Redis Success Req / Session:</td>
+            <td><span class="redisSuccessCallsSession"></span></td>
+            <td>Redis Failed Req / Session:</td>
+            <td><span class="redisFailedCallsSession"></span></td>
+        </tr>
+
+        <tr>
+            <td width="200">Redis Data Loaded:</td>
+            <td colspan="3"><span class="redisLoadVolSession"></span> bytes</td>
+
+        </tr>
+
+
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        <tr>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+    </table>
+</div>
+<br><br>
+
+<label>Concurrent Connections:
+    <input type="text" id="concur" placeholder="Post Amount" value="40"/>
+</label><br>
+
+
+<label>POST Volume:
+<input type="text" id="posts" placeholder="Post Amount" value="10"/>
+    </label><br>
+
+<br>
+<label>GET Volume:
+<input type="text" id="gets" placeholder="Get Amount" value="10"/> </label><br>
+<input type="button" id="send" value="Send" onclick="submitRequest();"/>
+</body>
+</html>
