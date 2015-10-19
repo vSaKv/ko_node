@@ -7,9 +7,7 @@
 
 var Consumer = require('./node.js');
 
-
 var con = new Consumer();
 
-//console.log(con.script);
-
-con.start(true);
+//where true,10 enable benchmark and set refresh interval
+con.start(true,10);

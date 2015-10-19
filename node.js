@@ -58,17 +58,16 @@ function Consumer() {
 
 
 	/*
-	 script to find single element in ordered list by timestamp, that time in past
-	 check if delivery retry not exceeds, marked as failed otherwise
+	 Redis lua script to find single element in ordered list by timestamp, that time in past
+	 check if delivery attempts not exceeds what in config, remove from set otherwise, add to abandoned calls
 	 */
 
 	this.script=
-		'\ local function processQueue()\
-		\	\
-		\ 	local newHash = redis.call("zrangebyscore", "sQue", 5,ARGV[1],"limit",0,2)\
-		\	local returnValue={}\
+		'\		local function processQueue()\
+		\ 			local newHash = redis.call("zrangebyscore", "sQue", 5,ARGV[1],"limit",0,2)\
+		\			local returnValue={}\
 		\ \
-		\		if(newHash[1]~=nil) then\
+		\			if(newHash[1]~=nil) then\
 		\				local timeAndCount = redis.call("hmget",newHash[1],"count","load")\
 		\ \
 		\				if(timeAndCount[1]~=false) then\
@@ -95,39 +94,39 @@ function Consumer() {
 		\ \
 		\ 				end\
 		\ \
-		\		else\
+		\			else\
 		\				returnValue=({"subscribe"})\
-		\		end\
+		\			end\
 		\ \
-		\	if(returnValue[1]=="next") then\
-		\			return processQueue()\
+		\			if(returnValue[1]=="next") then\
+		\				return processQueue()\
 		\ \
-		\	else\
-		\			return (returnValue)\
+		\			else\
+		\				return (returnValue)\
 		\ \
-		\	end\
+		\			end\
 		\ \
-		\ end\
+		\ 		end\
 		\ \
-		\	local returString=processQueue()\
+		\		local returString=processQueue()\
 		\ \
-		\	if(returString[1]=="process") then\
+		\		if(returString[1]=="process") then\
 		\			return ({returString[1],returString[2],returString[3],returString[4],returString[5]})\
 		\ \
-		\	elseif(returString[1]=="subscribe") then\
+		\		elseif(returString[1]=="subscribe") then\
 		\			return (returString)\
 		\ \
-		\	end';
+		\		end';
 
+	//calculating SHA1 for Redis evalsha
 	this.shasum = crypto.createHash('sha1');
 	this.shasum.update(this.script);
 	this.scriptSha=this.shasum.digest('hex');
-	//console.log(shasum.digest('hex'));
 
+
+	// save shutdown
 	process.on ('SIGTERM', self.ShutDown);
 	process.on ('SIGINT', self.ShutDown);
-
-
 
 	Consumer.prototype.ShutDown= function() {
 		console.log("Received kill signal, shutting down gracefully.");
@@ -148,20 +147,19 @@ function Consumer() {
 				cluster.fork();
 			}
 		} else {
-			/*
-				Subscribe to redis sub/pub to receive update notification
-			 */
-			self.client.on("subscribe", function (channel, count) {
-			});
+			// Subscribe to redis sub/pub to receive update notification
+
+			self.client.on("subscribe", function (channel, count) {});
 
 			self.client.on("message", function (channel, message) {
 				console.log('new message');
-				/*
-				 After acknowledged, stop listening for updates and proceed with fetching script, Will resubscribe if no new record found.
-				 */
+
+				// After acknowledged, stop listening for updates and proceed with fetching script, Will resubscribe if no new record found.
 				self.client.unsubscribe();
 				self.prepFetchTask();
 			});
+
+			// initial subcription call
 			self.client.subscribe("queue");
 		}
 	}
@@ -169,20 +167,18 @@ function Consumer() {
 	Consumer.prototype.nonCluster= function () {
 		console.log('Starting Single Threaded App');
 
-		/*
-		 Subscribe to redis sub/pub to receive update notification
-		 */
+		//Subscribe to redis sub/pub to receive update notification
 		self.client.on("subscribe", function (channel, count) {});
 
 		self.client.on("message", function (channel, message) {
 			console.log('new message');
-			/*
-			 After acknowledged, stop listening for updates and proceed with fetching script, Will resubscribe if no new record found.
-			 */
+			// After acknowledged, stop listening for updates and proceed with fetching script, Will resubscribe if no new record found.
+
 			self.client.unsubscribe();
 			self.prepFetchTask();
 		});
 
+		// initial subcription call
 		self.client.subscribe("queue");
 	}
 
@@ -199,6 +195,17 @@ function Consumer() {
 		if(BenchMark){
 			self.showBenchmark(refreshInterval);
 		}
+
+		//safe call function, to check if script stay subscribed
+		self.confirmSubscription();
+	}
+
+	Consumer.prototype.confirmSubscription = function (refreshInterval) {
+		setInterval(function(){
+			if(self.activeConn<=0 && self.shutingDown===false){
+				self.client.subscribe("queue");
+			}
+		},60*1000);
 	}
 
 	Consumer.prototype.showBenchmark = function (refreshInterval) {
@@ -218,8 +225,8 @@ function Consumer() {
 
 			self.startEndMinute=Math.floor(Date.now() / 1000);
 
-			console.log('Request Per Second: '+Math.floor((self.totalCallsPerSession-self.callInMinute)/(self.startEndMinute-self.startFirstMinute));
-			console.log('Average O/s Since Start: '+Math.floor(self.totalCallsPerSession/(self.startEndMinute-self.startTime)));
+			console.log('Request Per Second: '+Math.floor((self.totalCallsPerSession-self.callInMinute)/(self.startEndMinute-self.startFirstMinute)));
+			console.log('Average op/s Since Start: '+Math.floor(self.totalCallsPerSession/(self.startEndMinute-self.startTime)));
 			console.log('Active Connections: '+self.activeConn);
 			console.log('');
 			console.log('');
@@ -268,44 +275,43 @@ function Consumer() {
 
 		//try use cached scrypt, save bandwith
 		self.client2.evalsha(argsSha, function(err, reply) {
-			if(reply==undefined){
+
+			if(reply!=undefined){
+
+				//if not exceeded concurrent connection and not going down, then try to call itself to check if new record found
+				if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+					self.prepFetchTask();
+				}
+				self.activeConn++;
+
+				//do the same after callback
+				self.processReply(reply,function(){
+					self.activeConn--;
+					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+						self.prepFetchTask();
+					}
+
+				});
+			}else{
 
 				self.client2.eval(args, function(err, reply) {
 
+					//if not exceeded concurrent connection and not going down, then try to call itself to check if new record found
+					if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
+						self.prepFetchTask();
+					}
 					self.activeConn++;
+
+					//do the same after callback
 					self.processReply(reply,function(){
 						self.activeConn--;
 
-						//if not exceeded concurrent connection and not going down, then try to call itself to check if new record found
 						if(self.activeConn<self.config['activeConnections'] && self.shutingDown===false){
-								self.prepFetchTask();
+							self.prepFetchTask();
 						}
 					});
 
 				})
-			}else{
-
-				if(self.activeConn<self.config['activeConnections']){
-					if(self.shutingDown===false){
-						//setTimeout(function(){
-							self.prepFetchTask();
-						//},1);
-
-					}
-				}
-				self.activeConn++;
-				self.processReply(reply,function(){
-					self.activeConn--;
-					if(self.activeConn<self.config['activeConnections']){
-						//setTimeout(function(){
-							self.prepFetchTask();
-						//},1);
-					}
-
-					//self.prepFetchTask();
-					//console.log('555');
-				});
-
 			}
 		});
 
@@ -313,25 +319,8 @@ function Consumer() {
 
 	Consumer.prototype.processReply = function (reply,callback) {
 
-		if(reply==undefined){
-			console.log('error found try to subscribe');
-			if(self.shutingDown===false){
-			//	self.client.subscribe("queue");
-			}
-			callback();
-		}else if(reply[0]=="subscribe"){
-			//console.log('all data processed, subscribe to que');
-
-			if(self.shutingDown===false){
-				if(self.activeConn==0){
-					self.client.subscribe("queue");
-				}
-
-			}
-			callback();
-		}else if(reply[0]=="process"){
-			//console.log('data received handle to parser');
-			//console.log(reply);
+		if(reply[0]=="process"){
+			//console.log('record found and we ready to send request');
 
 			self.prepToSend(reply,function(status){
 				if(parseInt(status)==200){
@@ -342,14 +331,24 @@ function Consumer() {
 				callback();
 			});
 
+		}else if(reply[0]=="subscribe"){
+			//console.log('no more records to fetch, and last connection will subscribe to que');
+			if(self.shutingDown===false && self.activeConn<=0){
+				self.client.subscribe("queue");
+			}
+			callback();
+
+		}else if(reply==undefined){
+			//console.log('Should not be here, but if redis overcommit or some crazy stuff.');
+			callback();
+
 		}
 	}
 
-
-
-
-
 	Consumer.prototype.prepToSend = function (reply,callback) {
+		/*
+			Breaking payload apart and submit to POST or GET functions
+		 */
 
 		var loadHash=reply[1];
 		var loadBody=JSON.parse(reply[2]);
@@ -357,17 +356,17 @@ function Consumer() {
 
 		self.totalCallsPerSession++;
 
-
-
-		//this.sessionPostReq=0;
-		//this.sucessPostReq=0;
-		//this.failedPostReq=0;
-
 		if(loadBody['endpoint']['method'].toLowerCase()=='get'){
 			self.sessionGetReq++;
 
 			var postKeys = loadBody['data'];
 			var urlWithPlaceholders = loadBody['endpoint']['url'];
+
+			/*
+				replacing placeholders with data
+				"http://sample_domain_endpoint.com/data?key={key}&value={value}&foo={bar}"		=>
+			 	"http://sample_domain_endpoint.com/data?key=Phyllobates&value=Terribilis&foo="
+			 */
 
 			loadBody['endpoint']['url'] = urlWithPlaceholders.replace(/{([^}]+)}/gi, function(placeholder) {
 				var key=placeholder.substring(1,placeholder.length-1);
@@ -381,21 +380,19 @@ function Consumer() {
 					self.mostRecentSuccess=body;
 					self.mostRecentSuccessHash=loadHash;
 					self.succesGetReq++;
-					self.updateRedisRecord('GET',loadHash,statusCode,body,deliveryAttempt,responseFinished);
 				}else{
 					self.mostRecentError=body;
 					self.mostRecentErrorHash=loadHash;
 					self.failedGetReq++;
-					self.updateRedisRecord('GET',loadHash,statusCode,body,deliveryAttempt,responseFinished);
 				}
+				self.updateRedisRecord('GET',loadHash,statusCode,body,deliveryAttempt,responseFinished);
 				callback(statusCode)
 			});
 		}
-		if(loadBody['endpoint']['method'].toLowerCase()=='post'){
-			self.sessionPostReq++;
 
-			var postKeys = loadBody['data'];
-			var urlWithPlaceholders = loadBody['endpoint']['url'];
+		if(loadBody['endpoint']['method'].toLowerCase()=='post'){
+			//data from payload send with POST
+			self.sessionPostReq++;
 
 			self.postReqSend(loadBody,function(statusCode,body,deliveryAttempt){
 				var responseFinished=Math.floor(Date.now() / 1000);
@@ -403,27 +400,26 @@ function Consumer() {
 				if(parseInt(statusCode)==200){
 					self.mostRecentSuccess=body;
 					self.mostRecentSuccessHash=loadHash;
-					self.succesPostReq++;
-					self.updateRedisRecord('POST',loadHash,statusCode,body,deliveryAttempt,responseFinished);
+					self.sucessPostReq++;
 				}else{
 					self.mostRecentError=body;
 					self.mostRecentErrorHash=loadHash;
-					self.failedPosttReq++;
-					self.updateRedisRecord('POST',loadHash,statusCode,body,deliveryAttempt,responseFinished);
+					self.failedPostReq++;
 				}
+
+				self.updateRedisRecord('POST',loadHash,statusCode,body,deliveryAttempt,responseFinished);
 				callback(statusCode)
 			});
 		}
-
 	}
-
-	function saveResultBack(loadHash,statusCode,body,deliveryAttempt,responseFinished){
-
-	}
-
 
 	Consumer.prototype.updateRedisRecord = function (typeReq,loadHash,statusCode,body,deliveryAttempt,responseFinished) {
 
+		/*
+			little worker to update Redis record with:
+			3) Log delivery time, response code, response time, and response body.
+			and if failed, schedule redelivery
+		 */
 			var multi = self.UpdateRedis.multi();
 
 			multi.hset(loadHash, 'statusCode',statusCode);
@@ -431,28 +427,29 @@ function Consumer() {
 			multi.hset(loadHash, 'deliveryAttempt',deliveryAttempt);
 			multi.hset(loadHash, 'responseFinished',responseFinished);
 
-			if(parseInt(statusCode)==200){
-				multi.incrby("successCalls", 1);
-				multi.zrem('sQue',loadHash);
-			}else{
-				multi.incrby("failedCalls", 1);
-				multi.hincrby(loadHash, 'count',1);
-				multi.zadd('sQue',responseFinished+self.config['deliveryAttempts'][deliveryAttempt],loadHash);
-			}
+				if(parseInt(statusCode)==200){
+					multi.incrby("successCalls", 1);
+					multi.zrem('sQue',loadHash);
+					multi.sadd('successList',loadHash);
+				}else{
+					multi.incrby("failedCalls", 1);
+					multi.hincrby(loadHash, 'count',1);
+					multi.zadd('sQue',responseFinished+self.config['deliveryAttempts'][deliveryAttempt],loadHash);
+				}
 
 			multi.exec(function (err, replies) {
 			});
-
 	}
 
 	Consumer.prototype.getReqSend = function (loadBody,callback) {
+		//GET request routine
 
 		var parsedURL=url.parse(loadBody['endpoint']['url']);
 
 		var options = {
 			host: parsedURL['hostname'],
 			path:'/tst.php',
-			path: parsedURL['path'],
+			//path: parsedURL['path'],
 			agent: false
 		};
 		var deliveryT=Math.floor(Date.now() / 1000);
@@ -467,23 +464,26 @@ function Consumer() {
 				callback(res.statusCode,body,deliveryT);
 			})
 
-		}).on('error', function(e) {
+			})
+
+			.on('error', function(e) {
 				//console.log(e);
 				callback('500',JSON.stringify(e),deliveryT);
 
-			});
+			})
 
-		req.setTimeout(self.config['responseTimeOut']*1000, function(){
+			.setTimeout(self.config['responseTimeOut']*1000, function(){
 			req.abort();
 		});
 	}
 
 
 	Consumer.prototype.postReqSend = function (loadBody,callback) {
+		//POST request routine
 
 		var parsedURL=url.parse(loadBody['endpoint']['url']);
 
-		var da=JSON.stringify({'data':loadBody['data']});
+		var payLoad=JSON.stringify({'data':loadBody['data']});
 
 		var options = {
 			hostname: parsedURL['hostname'],
@@ -493,32 +493,32 @@ function Consumer() {
 			agent: false,
 			headers: {
 				'Content-Type': 'application/json',
-				'Content-Length': da.length
+				'Content-Length': payLoad.length
 			}
 		};
 
 		var req = http.request(options, function(res) {
-			var body = '';
-			res.setEncoding('utf8');
+				var body = '';
+				res.setEncoding('utf8');
 
-			res.on('data', function (chunk) {
-				body += chunk;
-			});
-			res.on('end', function() {
-				callback(res.statusCode,body,deliveryT);
+				res.on('data', function (chunk) {
+					body += chunk;
+				});
+				res.on('end', function() {
+					callback(res.statusCode,body,deliveryT);
+				})
 			})
-		}).on('error', function(e) {
-			callback('500',JSON.stringify(e),deliveryT);
-		});
+			.on('error', function(e) {
+				callback('500',JSON.stringify(e),deliveryT);
+			});
 
-		req.write(da);
+		req.write(payLoad);
 		req.end();
 
 		req.setTimeout(self.config['responseTimeOut']*1000, function(){
 			req.abort();
 		});
 	}
-
 }
 
 
