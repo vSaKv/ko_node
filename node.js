@@ -461,8 +461,7 @@ function Consumer() {
 
 		var options = {
 			host: parsedURL['hostname'],
-			path:'/tst.php',
-			//path: parsedURL['path'],
+			path: parsedURL['path'],
 			agent: false
 		};
 		var deliveryT=Math.floor(Date.now() / 1000);
@@ -500,8 +499,7 @@ function Consumer() {
 
 		var options = {
 			hostname: parsedURL['hostname'],
-			//path: parsedURL['path'],
-			path:'/tst.php',
+			path: parsedURL['path'],
 			method: 'POST',
 			agent: false,
 			headers: {

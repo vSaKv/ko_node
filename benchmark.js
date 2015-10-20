@@ -182,13 +182,8 @@ dispatcher.onGet("/start", function (req, res) {
 	var query = url_parts.query;
 
 	var dest = {
-		//host:'localhost', //ingest script location
-		//path:'/i',
 		host: '159.203.110.136', //ingest script location
 		path: '/i',
-
-		//loadHost:'localhost', //payload destination
-		//loadPath:'test.php'
 
 		loadHost: '159.203.110.136', //payload destination
 		loadPath: '/test.php'
@@ -246,7 +241,7 @@ dispatcher.onGet("/start", function (req, res) {
 		'failedPostCalls': 0,
 		'failedGetsCalls': 0,
 		'processedPosts': 0,
-		'processedGets': 0,
+		'processedGets': 0
 	};
 
 
@@ -461,7 +456,7 @@ function sendGet(dest, callback) {
 	var payLoad = {
 		"endpoint": {
 			"method": "GET",
-			"url": 'http://' + dest['loadHost'] + '/' + dest['loadPath']
+			"url": 'http://' + dest['loadHost']+ dest['loadPath']
 		},
 		"data": [
 			{
@@ -481,7 +476,6 @@ function sendGet(dest, callback) {
 
 	var payLoad = JSON.stringify(payLoad);
 
-	//console.log(dest);
 	var options = {
 		hostname: dest['host'],
 		path: dest['path'],
@@ -530,7 +524,7 @@ function sendPost(dest, callback) {
 	var payLoad = {
 		"endpoint": {
 			"method": "POST",
-			"url": 'http://' + dest['loadHost'] + '/' + dest['loadPath']
+			"url": 'http://' + dest['loadhost'] + dest['loadPath']
 		},
 		"data": [
 			{
@@ -550,7 +544,6 @@ function sendPost(dest, callback) {
 
 	var payLoad = JSON.stringify(payLoad);
 
-	//console.log(dest);
 	var options = {
 		hostname: dest['host'],
 		path: dest['path'],
