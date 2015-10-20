@@ -524,7 +524,7 @@ function sendPost(dest, callback) {
 	var payLoad = {
 		"endpoint": {
 			"method": "POST",
-			"url": 'http://' + dest['loadhost'] + dest['loadPath']
+			"url": 'http://' + dest['loadHost'] + dest['loadPath']
 		},
 		"data": [
 			{
